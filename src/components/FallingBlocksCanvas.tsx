@@ -137,8 +137,7 @@ export default function FallingBlocksCanvas() {
 
       if (bType === 'TNT') {
         flashAlpha = 1.0;
-        screenShake = 20;
-        let blocksCleared = 0;
+        screenShake = 25;
         for (let c = 1; c < COLS - 1; c++) {
           for (let r = 0; r < 3; r++) {
             const targetRow = ROWS - 1;
@@ -154,7 +153,6 @@ export default function FallingBlocksCanvas() {
               gridRef.current[c][i] = gridRef.current[c][i - 1];
             }
             gridRef.current[c][0] = getRandomBlock();
-            blocksCleared++;
           }
         }
         setDepth(d => d - 3);
@@ -163,7 +161,7 @@ export default function FallingBlocksCanvas() {
 
     const processNuke = () => {
       flashAlpha = 1.0;
-      screenShake = 30;
+      screenShake = 35;
       const shaftWidth = COLS * BLOCK_SIZE;
       const shaftHeight = ROWS * BLOCK_SIZE;
       const shaftX = (canvas.width - shaftWidth) / 2;
