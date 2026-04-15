@@ -1,0 +1,6 @@
+{
+  "name": "Falling Blocks Live Stream",
+  "description": "An interactive, physics-based falling blocks game overlay for live streams, featuring 3D-styled blocks and autonomous gameplay.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
