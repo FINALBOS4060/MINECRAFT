@@ -5,7 +5,9 @@ import math
 
 WIDTH, HEIGHT = 1280, 720
 FPS = 60
-COLS, ROWS = 7, 14
+MINE_COLS = 7
+COLS = MINE_COLS + 2 # 1 bedrock on each side
+ROWS = 14
 BLOCK_SIZE = 48
 SHAFT_WIDTH = COLS * BLOCK_SIZE
 SHAFT_HEIGHT = ROWS * BLOCK_SIZE
@@ -20,6 +22,7 @@ BLOCK_TYPES = ["Stone", "Coal", "Iron", "Gold", "Diamond", "TNT"]
 BLOCK_PROBS = [0.65, 0.15, 0.10, 0.05, 0.03, 0.02]
 
 BLOCK_COLORS = {
+    "Bedrock": {"base": (20, 20, 20),    "high": (40, 40, 40),    "shadow": (0, 0, 0)},
     "Stone":   {"base": (100, 100, 100), "high": (130, 130, 130), "shadow": (70, 70, 70)},
     "Coal":    {"base": (40, 40, 40),    "high": (60, 60, 60),    "shadow": (20, 20, 20)},
     "Iron":    {"base": (200, 180, 160), "high": (230, 210, 190), "shadow": (170, 150, 130)},
@@ -30,7 +33,7 @@ BLOCK_COLORS = {
 
 pygame.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Vertical Mining")
+pygame.display.set_caption("Vertical Mining - Cinematic Edition")
 clock = pygame.time.Clock()
 
 font_large = pygame.font.SysFont("Consolas", 36, bold=True)
@@ -40,11 +43,21 @@ font_small = pygame.font.SysFont("Consolas", 18)
 def get_random_block():
     return random.choices(BLOCK_TYPES, weights=BLOCK_PROBS, k=1)[0]
 
-grid = [[get_random_block() for _ in range(ROWS)] for _ in range(COLS)]
+grid = []
+for c in range(COLS):
+    col = []
+    for r in range(ROWS):
+        if c == 0 or c == COLS - 1:
+            col.append("Bedrock")
+        else:
+            col.append(get_random_block())
+    grid.append(col)
+
 block_counts = {bt: 0 for bt in BLOCK_TYPES}
-depth = -10000
+depth = -10405
 particles = []
 flash_alpha = 0.0
+screen_shake = 0.0
 pickaxe_angle = 0.0
 target_pickaxe_angle = 0.0
 command_queue = []
@@ -60,6 +73,12 @@ def create_block_surface(b_type):
     pygame.draw.polygon(surf, colors["shadow"], [(0, BLOCK_SIZE), (BLOCK_SIZE, BLOCK_SIZE), (BLOCK_SIZE-bevel, BLOCK_SIZE-bevel), (bevel, BLOCK_SIZE-bevel)])
     pygame.draw.polygon(surf, colors["shadow"], [(BLOCK_SIZE, 0), (BLOCK_SIZE-bevel, bevel), (BLOCK_SIZE-bevel, BLOCK_SIZE-bevel), (BLOCK_SIZE, BLOCK_SIZE)])
     pygame.draw.rect(surf, (255, 255, 255, 15), pygame.Rect(bevel, bevel, BLOCK_SIZE - bevel*2, BLOCK_SIZE - bevel*2))
+    
+    # Ambient Occlusion (soft inner shadow)
+    ao_surf = pygame.Surface((BLOCK_SIZE, BLOCK_SIZE), pygame.SRCALPHA)
+    pygame.draw.rect(ao_surf, (0, 0, 0, 40), ao_surf.get_rect(), 2)
+    surf.blit(ao_surf, (0, 0))
+
     if b_type == "TNT":
         text = pygame.font.SysFont("Arial", 14, bold=True).render("TNT", True, (255, 255, 255))
         surf.blit(text, text.get_rect(center=(BLOCK_SIZE//2, BLOCK_SIZE//2)))
@@ -73,7 +92,9 @@ def spawn_particles(x, y, color, count=10):
         particles.append({'x': x, 'y': y, 'vx': random.uniform(-5, 5), 'vy': random.uniform(-8, 2), 'life': 255, 'color': color, 'size': random.randint(4, 8)})
 
 def mine_block(col, row):
-    global depth, flash_alpha
+    global depth, flash_alpha, screen_shake
+    if col == 0 or col == COLS - 1: return
+    
     b_type = grid[col][row]
     block_counts[b_type] += 1
     spawn_particles(SHAFT_X + col * BLOCK_SIZE + BLOCK_SIZE // 2, SHAFT_Y + row * BLOCK_SIZE + BLOCK_SIZE // 2, BLOCK_COLORS[b_type]["base"])
@@ -84,7 +105,8 @@ def mine_block(col, row):
     
     if b_type == "TNT":
         flash_alpha = 255.0
-        for c in range(COLS):
+        screen_shake = 20.0
+        for c in range(1, COLS - 1):
             for r in range(3):
                 tb_type = grid[c][ROWS - 1]
                 block_counts[tb_type] += 1
@@ -93,17 +115,6 @@ def mine_block(col, row):
                     grid[c][i] = grid[c][i-1]
                 grid[c][0] = get_random_block()
         depth -= 3
-
-def process_nuke():
-    global depth, flash_alpha
-    flash_alpha = 255.0
-    for c in range(COLS):
-        for r in range(ROWS - 1, 9, -1):
-            grid[c][r] = grid[c][r - 10]
-        for r in range(10):
-            grid[c][r] = get_random_block()
-        spawn_particles(SHAFT_X + c * BLOCK_SIZE + BLOCK_SIZE // 2, SHAFT_Y + (ROWS - 1) * BLOCK_SIZE, (255, 255, 255), 15)
-    depth -= 10
 
 last_mine_time = pygame.time.get_ticks()
 last_cmd_time = pygame.time.get_ticks()
@@ -125,13 +136,22 @@ while running:
 
     if command_queue:
         cmd = command_queue.pop(0)
-        if cmd == "!nuke": process_nuke()
+        if cmd == "!nuke": 
+            flash_alpha = 255.0
+            screen_shake = 30.0
+            for c in range(1, COLS - 1):
+                for r in range(ROWS - 1, 9, -1):
+                    grid[c][r] = grid[c][r - 10]
+                for r in range(10):
+                    grid[c][r] = get_random_block()
+                spawn_particles(SHAFT_X + c * BLOCK_SIZE + BLOCK_SIZE // 2, SHAFT_Y + (ROWS - 1) * BLOCK_SIZE, (255, 255, 255), 15)
+            depth -= 10
         elif cmd.startswith("!drop "):
             item = cmd.split(" ")[1]
-            if item in BLOCK_TYPES: grid[random.randint(0, COLS - 1)][0] = item
+            if item in BLOCK_TYPES: grid[random.randint(1, COLS - 2)][0] = item
 
     if current_time - last_mine_time > 150:
-        target_col = random.randint(0, COLS - 1)
+        target_col = random.randint(1, COLS - 2)
         mine_block(target_col, ROWS - 1)
         depth -= 1
         target_pickaxe_angle = -45 if target_col < COLS // 2 else 45
@@ -148,17 +168,23 @@ while running:
         if p['life'] <= 0: particles.remove(p)
             
     if flash_alpha > 0: flash_alpha = max(0, flash_alpha - 500 * dt)
+    if screen_shake > 0: screen_shake = max(0, screen_shake - 60 * dt)
+
+    shake_x = random.uniform(-screen_shake, screen_shake)
+    shake_y = random.uniform(-screen_shake, screen_shake)
 
     screen.fill((2, 2, 2))
     
-    pygame.draw.rect(screen, (5, 5, 5), (SHAFT_X, SHAFT_Y, SHAFT_WIDTH, SHAFT_HEIGHT))
-    pygame.draw.rect(screen, (30, 30, 30), (SHAFT_X, SHAFT_Y, SHAFT_WIDTH, SHAFT_HEIGHT), 4)
+    shaft_rect = pygame.Rect(SHAFT_X + shake_x, SHAFT_Y + shake_y, SHAFT_WIDTH, SHAFT_HEIGHT)
+    pygame.draw.rect(screen, (5, 5, 5), shaft_rect)
+    pygame.draw.rect(screen, (30, 30, 30), shaft_rect, 4)
     
     for c in range(COLS):
         for r in range(ROWS):
-            bx, by = SHAFT_X + c * BLOCK_SIZE, SHAFT_Y + r * BLOCK_SIZE
+            bx, by = SHAFT_X + c * BLOCK_SIZE + shake_x, SHAFT_Y + r * BLOCK_SIZE + shake_y
             screen.blit(block_surfaces[grid[c][r]], (bx, by))
-            shadow_intensity = min(220, int(((abs(c - COLS / 2) / (COLS / 2))**2 * 0.3 + (r / ROWS) * 0.7) * 255))
+            
+            shadow_intensity = min(240, int((r / ROWS) * 200 + 40))
             shadow_surf = pygame.Surface((BLOCK_SIZE, BLOCK_SIZE), pygame.SRCALPHA)
             shadow_surf.fill((0, 0, 0, shadow_intensity))
             screen.blit(shadow_surf, (bx, by))
@@ -167,13 +193,13 @@ while running:
     pygame.draw.rect(pickaxe_surf, (101, 67, 33), (55, 20, 12, 100))
     pygame.draw.polygon(pickaxe_surf, (50, 200, 200), [(60, 30), (0, 60), (10, 20), (60, 0), (110, 20), (120, 60)])
     rotated_pickaxe = pygame.transform.rotate(pickaxe_surf, pickaxe_angle)
-    screen.blit(rotated_pickaxe, rotated_pickaxe.get_rect(center=(SHAFT_X + SHAFT_WIDTH // 2, SHAFT_Y + SHAFT_HEIGHT - 30)))
+    screen.blit(rotated_pickaxe, rotated_pickaxe.get_rect(center=(SHAFT_X + SHAFT_WIDTH // 2 + shake_x, SHAFT_Y + SHAFT_HEIGHT - 30 + shake_y)))
     
     for p in particles:
         if p['life'] > 0:
             psurf = pygame.Surface((p['size'], p['size']), pygame.SRCALPHA)
             psurf.fill((*p['color'], min(255, int(p['life']))))
-            screen.blit(psurf, (int(p['x']), int(p['y'])))
+            screen.blit(psurf, (int(p['x'] + shake_x), int(p['y'] + shake_y)))
             
     if flash_alpha > 0:
         flash_surf = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
@@ -189,7 +215,9 @@ while running:
     pygame.draw.circle(screen, (255, 0, 0, pulse_alpha), (30, 40), 10)
     pygame.draw.circle(screen, (255, 0, 0), (30, 40), 6)
     screen.blit(font_medium.render("LIVE", True, (255, 255, 255)), (50, 28))
-    screen.blit(font_large.render(f"Y: {int(depth)}", True, (100, 255, 100)), (20, 80))
+    
+    depth_str = f"DEPTH: {int(depth):,}m"
+    screen.blit(font_large.render(depth_str, True, (100, 255, 100)), (20, 80))
     screen.blit(font_small.render("INVENTORY", True, (150, 160, 180)), (20, 150))
     
     y_offset = 200

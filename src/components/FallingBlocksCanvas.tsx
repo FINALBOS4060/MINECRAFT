@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Trophy, Terminal } from 'lucide-react';
 
-type BlockType = 'Stone' | 'Coal' | 'Iron' | 'Gold' | 'Diamond' | 'TNT';
+type BlockType = 'Bedrock' | 'Stone' | 'Coal' | 'Iron' | 'Gold' | 'Diamond' | 'TNT';
 
 interface BlockColors {
   base: string;
@@ -13,6 +13,7 @@ const BLOCK_TYPES: BlockType[] = ['Stone', 'Coal', 'Iron', 'Gold', 'Diamond', 'T
 const BLOCK_PROBS = [0.65, 0.15, 0.10, 0.05, 0.03, 0.02];
 
 const BLOCK_COLORS: Record<BlockType, BlockColors> = {
+  Bedrock: { base: '#141414', light: '#282828', dark: '#000000' },
   Stone: { base: '#646464', light: '#828282', dark: '#464646' },
   Coal: { base: '#282828', light: '#3c3c3c', dark: '#141414' },
   Iron: { base: '#c8b4a0', light: '#e6d2be', dark: '#aa9682' },
@@ -21,7 +22,8 @@ const BLOCK_COLORS: Record<BlockType, BlockColors> = {
   TNT: { base: '#c83232', light: '#f05050', dark: '#961e1e' }
 };
 
-const COLS = 7;
+const MINE_COLS = 7;
+const COLS = MINE_COLS + 2; // 1 bedrock on each side
 const ROWS = 14;
 const BLOCK_SIZE = 48;
 const MINE_RATE_MS = 150;
@@ -54,7 +56,7 @@ export default function FallingBlocksCanvas() {
   const particlesRef = useRef<Particle[]>([]);
   const commandQueueRef = useRef<string[]>([]);
   
-  const [depth, setDepth] = useState(-10000);
+  const [depth, setDepth] = useState(-10405);
   const [blockCounts, setBlockCounts] = useState<Record<string, number>>({
     Stone: 0, Coal: 0, Iron: 0, Gold: 0, Diamond: 0, TNT: 0
   });
@@ -64,7 +66,11 @@ export default function FallingBlocksCanvas() {
     for (let c = 0; c < COLS; c++) {
       initialGrid[c] = [];
       for (let r = 0; r < ROWS; r++) {
-        initialGrid[c][r] = getRandomBlock();
+        if (c === 0 || c === COLS - 1) {
+          initialGrid[c][r] = 'Bedrock';
+        } else {
+          initialGrid[c][r] = getRandomBlock();
+        }
       }
     }
     gridRef.current = initialGrid;
@@ -78,6 +84,7 @@ export default function FallingBlocksCanvas() {
     if (!ctx) return;
 
     let flashAlpha = 0;
+    let screenShake = 0;
     let pickaxeAngle = 0;
     let targetPickaxeAngle = 0;
     let lastMineTime = Date.now();
@@ -106,6 +113,8 @@ export default function FallingBlocksCanvas() {
     };
 
     const mineBlock = (col: number, row: number) => {
+      if (col === 0 || col === COLS - 1) return;
+
       const bType = gridRef.current[col][row];
       
       setBlockCounts(prev => ({ ...prev, [bType]: (prev[bType] || 0) + 1 }));
@@ -128,8 +137,9 @@ export default function FallingBlocksCanvas() {
 
       if (bType === 'TNT') {
         flashAlpha = 1.0;
+        screenShake = 20;
         let blocksCleared = 0;
-        for (let c = 0; c < COLS; c++) {
+        for (let c = 1; c < COLS - 1; c++) {
           for (let r = 0; r < 3; r++) {
             const targetRow = ROWS - 1;
             const tbType = gridRef.current[c][targetRow];
@@ -153,12 +163,13 @@ export default function FallingBlocksCanvas() {
 
     const processNuke = () => {
       flashAlpha = 1.0;
+      screenShake = 30;
       const shaftWidth = COLS * BLOCK_SIZE;
       const shaftHeight = ROWS * BLOCK_SIZE;
       const shaftX = (canvas.width - shaftWidth) / 2;
       const shaftY = (canvas.height - shaftHeight) / 2;
 
-      for (let c = 0; c < COLS; c++) {
+      for (let c = 1; c < COLS - 1; c++) {
         for (let r = ROWS - 1; r >= 10; r--) {
           gridRef.current[c][r] = gridRef.current[c][r - 10];
         }
@@ -192,14 +203,14 @@ export default function FallingBlocksCanvas() {
         } else if (cmd?.startsWith('!drop ')) {
           const item = cmd.split(' ')[1] as BlockType;
           if (BLOCK_TYPES.includes(item)) {
-            const c = Math.floor(Math.random() * COLS);
+            const c = Math.floor(Math.random() * (COLS - 2)) + 1;
             gridRef.current[c][0] = item;
           }
         }
       }
 
       if (now - lastMineTime > MINE_RATE_MS) {
-        const targetCol = Math.floor(Math.random() * COLS);
+        const targetCol = Math.floor(Math.random() * (COLS - 2)) + 1;
         mineBlock(targetCol, ROWS - 1);
         targetPickaxeAngle = targetCol < COLS / 2 ? -0.8 : 0.8;
         lastMineTime = now;
@@ -217,6 +228,17 @@ export default function FallingBlocksCanvas() {
       const shaftHeight = ROWS * BLOCK_SIZE;
       const shaftX = (canvas.width - shaftWidth) / 2;
       const shaftY = (canvas.height - shaftHeight) / 2;
+
+      let shakeX = 0;
+      let shakeY = 0;
+      if (screenShake > 0) {
+        shakeX = (Math.random() - 0.5) * screenShake;
+        shakeY = (Math.random() - 0.5) * screenShake;
+        screenShake = Math.max(0, screenShake - 1);
+      }
+
+      ctx.save();
+      ctx.translate(shakeX, shakeY);
 
       ctx.fillStyle = '#050505';
       ctx.fillRect(shaftX, shaftY, shaftWidth, shaftHeight);
@@ -270,6 +292,11 @@ export default function FallingBlocksCanvas() {
           ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
           ctx.fillRect(bx + bevel, by + bevel, BLOCK_SIZE - bevel * 2, BLOCK_SIZE - bevel * 2);
 
+          // Ambient Occlusion
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(bx, by, BLOCK_SIZE, BLOCK_SIZE);
+
           if (bType === 'TNT') {
             ctx.fillStyle = '#fff';
             ctx.font = 'bold 14px Arial';
@@ -278,9 +305,7 @@ export default function FallingBlocksCanvas() {
             ctx.fillText('TNT', bx + BLOCK_SIZE / 2, by + BLOCK_SIZE / 2);
           }
 
-          const distX = Math.abs(c - COLS / 2) / (COLS / 2);
-          const distY = r / ROWS;
-          const shadowIntensity = Math.min(0.85, (distX * distX * 0.3) + (distY * 0.7));
+          const shadowIntensity = Math.min(0.9, (r / ROWS) * 0.8 + 0.15);
           ctx.fillStyle = `rgba(0, 0, 0, ${shadowIntensity})`;
           ctx.fillRect(bx, by, BLOCK_SIZE, BLOCK_SIZE);
         }
@@ -320,6 +345,8 @@ export default function FallingBlocksCanvas() {
         }
       }
 
+      ctx.restore(); // Restore shake translation
+
       if (flashAlpha > 0) {
         ctx.fillStyle = `rgba(255, 255, 255, ${flashAlpha})`;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -354,7 +381,7 @@ export default function FallingBlocksCanvas() {
         </div>
 
         <div className="text-4xl font-bold text-green-400 mb-10 tracking-wider drop-shadow-[0_0_10px_rgba(74,222,128,0.3)]">
-          Y: {Math.floor(depth)}
+          DEPTH: {Math.floor(depth).toLocaleString()}m
         </div>
         
         <div className="text-sm text-slate-400 mb-6 border-b border-slate-800/50 pb-2 font-bold tracking-widest">
