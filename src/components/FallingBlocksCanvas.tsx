@@ -1,8 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Trophy, Terminal } from 'lucide-react';
 
-// Types and Constants
-type BlockType = 'Bedrock' | 'Stone' | 'Coal' | 'Iron' | 'Gold' | 'Diamond' | 'TNT';
+type BlockType = 'Stone' | 'Coal' | 'Iron' | 'Gold' | 'Diamond' | 'TNT';
 
 interface BlockColors {
   base: string;
@@ -14,7 +13,6 @@ const BLOCK_TYPES: BlockType[] = ['Stone', 'Coal', 'Iron', 'Gold', 'Diamond', 'T
 const BLOCK_PROBS = [0.65, 0.15, 0.10, 0.05, 0.03, 0.02];
 
 const BLOCK_COLORS: Record<BlockType, BlockColors> = {
-  Bedrock: { base: '#141414', light: '#282828', dark: '#000000' },
   Stone: { base: '#646464', light: '#828282', dark: '#464646' },
   Coal: { base: '#282828', light: '#3c3c3c', dark: '#141414' },
   Iron: { base: '#c8b4a0', light: '#e6d2be', dark: '#aa9682' },
@@ -23,9 +21,9 @@ const BLOCK_COLORS: Record<BlockType, BlockColors> = {
   TNT: { base: '#c83232', light: '#f05050', dark: '#961e1e' }
 };
 
-const COLS = 10;
-const ROWS = 20;
-const BLOCK_SIZE = 36;
+const COLS = 7;
+const ROWS = 14;
+const BLOCK_SIZE = 48;
 const MINE_RATE_MS = 150;
 
 interface Particle {
@@ -56,22 +54,17 @@ export default function FallingBlocksCanvas() {
   const particlesRef = useRef<Particle[]>([]);
   const commandQueueRef = useRef<string[]>([]);
   
-  const [depth, setDepth] = useState(-10405);
+  const [depth, setDepth] = useState(-10000);
   const [blockCounts, setBlockCounts] = useState<Record<string, number>>({
     Stone: 0, Coal: 0, Iron: 0, Gold: 0, Diamond: 0, TNT: 0
   });
 
-  // Initialize Grid
   useEffect(() => {
     const initialGrid: BlockType[][] = [];
     for (let c = 0; c < COLS; c++) {
       initialGrid[c] = [];
       for (let r = 0; r < ROWS; r++) {
-        if (c === 0 || c === COLS - 1) {
-          initialGrid[c][r] = 'Bedrock';
-        } else {
-          initialGrid[c][r] = getRandomBlock();
-        }
+        initialGrid[c][r] = getRandomBlock();
       }
     }
     gridRef.current = initialGrid;
@@ -113,12 +106,10 @@ export default function FallingBlocksCanvas() {
     };
 
     const mineBlock = (col: number, row: number) => {
-      if (col === 0 || col === COLS - 1) return; // Cannot mine bedrock
-
       const bType = gridRef.current[col][row];
       
       setBlockCounts(prev => ({ ...prev, [bType]: (prev[bType] || 0) + 1 }));
-      setDepth(d => d - 0.1);
+      setDepth(d => d - 1);
 
       const shaftWidth = COLS * BLOCK_SIZE;
       const shaftHeight = ROWS * BLOCK_SIZE;
@@ -130,18 +121,16 @@ export default function FallingBlocksCanvas() {
       
       spawnParticles(px, py, BLOCK_COLORS[bType].base);
 
-      // Shift down
       for (let r = row; r > 0; r--) {
         gridRef.current[col][r] = gridRef.current[col][r - 1];
       }
       gridRef.current[col][0] = getRandomBlock();
 
-      // TNT Logic
       if (bType === 'TNT') {
         flashAlpha = 1.0;
         let blocksCleared = 0;
-        for (let c = 1; c < COLS - 1; c++) {
-          for (let r = 0; r < 3; r++) { // Clear bottom 3 rows
+        for (let c = 0; c < COLS; c++) {
+          for (let r = 0; r < 3; r++) {
             const targetRow = ROWS - 1;
             const tbType = gridRef.current[c][targetRow];
             
@@ -169,27 +158,24 @@ export default function FallingBlocksCanvas() {
       const shaftX = (canvas.width - shaftWidth) / 2;
       const shaftY = (canvas.height - shaftHeight) / 2;
 
-      for (let c = 1; c < COLS - 1; c++) {
-        // Shift down by 5
-        for (let r = ROWS - 1; r >= 5; r--) {
-          gridRef.current[c][r] = gridRef.current[c][r - 5];
+      for (let c = 0; c < COLS; c++) {
+        for (let r = ROWS - 1; r >= 10; r--) {
+          gridRef.current[c][r] = gridRef.current[c][r - 10];
         }
-        // Fill top 5
-        for (let r = 0; r < 5; r++) {
+        for (let r = 0; r < 10; r++) {
           gridRef.current[c][r] = getRandomBlock();
         }
         
         const tx = shaftX + c * BLOCK_SIZE + BLOCK_SIZE / 2;
         const ty = shaftY + (ROWS - 1) * BLOCK_SIZE;
-        spawnParticles(tx, ty, '#cccccc', 10);
+        spawnParticles(tx, ty, '#ffffff', 15);
       }
-      setDepth(d => d - 5);
+      setDepth(d => d - 10);
     };
 
     const render = () => {
       const now = Date.now();
 
-      // Simulated Command Queue
       if (now - lastCmdTime > 2000) {
         if (Math.random() < 0.1) {
           commandQueueRef.current.push('!nuke');
@@ -199,7 +185,6 @@ export default function FallingBlocksCanvas() {
         lastCmdTime = now;
       }
 
-      // Process Commands
       if (commandQueueRef.current.length > 0) {
         const cmd = commandQueueRef.current.shift();
         if (cmd === '!nuke') {
@@ -207,15 +192,14 @@ export default function FallingBlocksCanvas() {
         } else if (cmd?.startsWith('!drop ')) {
           const item = cmd.split(' ')[1] as BlockType;
           if (BLOCK_TYPES.includes(item)) {
-            const c = Math.floor(Math.random() * (COLS - 2)) + 1;
+            const c = Math.floor(Math.random() * COLS);
             gridRef.current[c][0] = item;
           }
         }
       }
 
-      // Auto Mining
       if (now - lastMineTime > MINE_RATE_MS) {
-        const targetCol = Math.floor(Math.random() * (COLS - 2)) + 1;
+        const targetCol = Math.floor(Math.random() * COLS);
         mineBlock(targetCol, ROWS - 1);
         targetPickaxeAngle = targetCol < COLS / 2 ? -0.8 : 0.8;
         lastMineTime = now;
@@ -227,7 +211,6 @@ export default function FallingBlocksCanvas() {
 
       pickaxeAngle += (targetPickaxeAngle - pickaxeAngle) * 0.3;
 
-      // Clear Canvas
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       const shaftWidth = COLS * BLOCK_SIZE;
@@ -235,14 +218,12 @@ export default function FallingBlocksCanvas() {
       const shaftX = (canvas.width - shaftWidth) / 2;
       const shaftY = (canvas.height - shaftHeight) / 2;
 
-      // Draw Shaft Background
       ctx.fillStyle = '#050505';
       ctx.fillRect(shaftX, shaftY, shaftWidth, shaftHeight);
       ctx.strokeStyle = '#1e1e1e';
       ctx.lineWidth = 4;
       ctx.strokeRect(shaftX, shaftY, shaftWidth, shaftHeight);
 
-      // Draw Grid
       for (let c = 0; c < COLS; c++) {
         for (let r = 0; r < ROWS; r++) {
           const bType = gridRef.current[c][r];
@@ -251,13 +232,11 @@ export default function FallingBlocksCanvas() {
           const bx = shaftX + c * BLOCK_SIZE;
           const by = shaftY + r * BLOCK_SIZE;
           const colors = BLOCK_COLORS[bType];
-          const bevel = 4;
+          const bevel = 5;
 
-          // Base
           ctx.fillStyle = colors.base;
           ctx.fillRect(bx, by, BLOCK_SIZE, BLOCK_SIZE);
 
-          // Top Bevel
           ctx.fillStyle = colors.light;
           ctx.beginPath();
           ctx.moveTo(bx, by);
@@ -266,7 +245,6 @@ export default function FallingBlocksCanvas() {
           ctx.lineTo(bx + bevel, by + bevel);
           ctx.fill();
 
-          // Left Bevel
           ctx.beginPath();
           ctx.moveTo(bx, by);
           ctx.lineTo(bx + bevel, by + bevel);
@@ -274,7 +252,6 @@ export default function FallingBlocksCanvas() {
           ctx.lineTo(bx, by + BLOCK_SIZE);
           ctx.fill();
 
-          // Bottom Bevel
           ctx.fillStyle = colors.dark;
           ctx.beginPath();
           ctx.moveTo(bx, by + BLOCK_SIZE);
@@ -283,7 +260,6 @@ export default function FallingBlocksCanvas() {
           ctx.lineTo(bx + bevel, by + BLOCK_SIZE - bevel);
           ctx.fill();
 
-          // Right Bevel
           ctx.beginPath();
           ctx.moveTo(bx + BLOCK_SIZE, by);
           ctx.lineTo(bx + BLOCK_SIZE - bevel, by + bevel);
@@ -291,52 +267,47 @@ export default function FallingBlocksCanvas() {
           ctx.lineTo(bx + BLOCK_SIZE, by + BLOCK_SIZE);
           ctx.fill();
 
-          // Inner Detail (Pixel Art Style)
           ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
           ctx.fillRect(bx + bevel, by + bevel, BLOCK_SIZE - bevel * 2, BLOCK_SIZE - bevel * 2);
 
-          // TNT Label
           if (bType === 'TNT') {
             ctx.fillStyle = '#fff';
-            ctx.font = 'bold 12px Arial';
+            ctx.font = 'bold 14px Arial';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText('TNT', bx + BLOCK_SIZE / 2, by + BLOCK_SIZE / 2);
           }
 
-          // Shadow Overlay (Deeper = Darker)
-          const shadowIntensity = r / ROWS;
-          ctx.fillStyle = `rgba(0, 0, 0, ${shadowIntensity * 0.8})`;
+          const distX = Math.abs(c - COLS / 2) / (COLS / 2);
+          const distY = r / ROWS;
+          const shadowIntensity = Math.min(0.85, (distX * distX * 0.3) + (distY * 0.7));
+          ctx.fillStyle = `rgba(0, 0, 0, ${shadowIntensity})`;
           ctx.fillRect(bx, by, BLOCK_SIZE, BLOCK_SIZE);
         }
       }
 
-      // Draw Giant Pickaxe
       ctx.save();
       ctx.translate(shaftX + shaftWidth / 2, shaftY + shaftHeight - 30);
       ctx.rotate(pickaxeAngle);
       
-      // Handle
       ctx.fillStyle = '#654321';
-      ctx.fillRect(-5, -50, 10, 90);
-      // Head (Diamond Pickaxe)
+      ctx.fillRect(-6, -60, 12, 100);
       ctx.fillStyle = '#32c8c8';
       ctx.beginPath();
-      ctx.moveTo(-50, -40);
-      ctx.quadraticCurveTo(0, -70, 50, -40);
-      ctx.lineTo(50, -30);
-      ctx.quadraticCurveTo(0, -50, -50, -30);
+      ctx.moveTo(-60, -50);
+      ctx.quadraticCurveTo(0, -80, 60, -50);
+      ctx.lineTo(60, -40);
+      ctx.quadraticCurveTo(0, -60, -60, -40);
       ctx.closePath();
       ctx.fill();
       
       ctx.restore();
 
-      // Draw Particles
       for (let i = particlesRef.current.length - 1; i >= 0; i--) {
         const p = particlesRef.current[i];
         p.x += p.vx;
         p.y += p.vy;
-        p.vy += 0.5; // Gravity
+        p.vy += 0.5;
         p.life -= 0.02;
         
         if (p.life <= 0) {
@@ -349,7 +320,6 @@ export default function FallingBlocksCanvas() {
         }
       }
 
-      // Draw Flash
       if (flashAlpha > 0) {
         ctx.fillStyle = `rgba(255, 255, 255, ${flashAlpha})`;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -368,22 +338,34 @@ export default function FallingBlocksCanvas() {
   }, []);
 
   return (
-    <div className="flex h-full w-full bg-[#050505] text-white font-mono overflow-hidden">
-      {/* Left Sidebar: Depth & Inventory */}
-      <div className="w-[280px] bg-[#0a0a0a] border-r border-[#1e1e1e] p-6 flex flex-col z-10 shrink-0">
-        <div className="text-4xl font-bold text-green-400 mb-10 tracking-wider">
+    <div className="flex h-full w-full bg-[#020202] text-white font-mono overflow-hidden relative">
+      <div className="absolute inset-0" ref={containerRef}>
+        <canvas ref={canvasRef} className="block w-full h-full" />
+        <div className="absolute inset-0 pointer-events-none shadow-[inset_0_0_200px_rgba(0,0,0,0.9)] z-0" />
+      </div>
+
+      <div className="w-[280px] h-full bg-slate-950/60 backdrop-blur-xl border-r border-slate-800/50 p-6 flex flex-col z-10 shrink-0 shadow-2xl">
+        <div className="flex items-center gap-3 mb-8">
+          <div className="relative flex h-4 w-4">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-4 w-4 bg-red-500"></span>
+          </div>
+          <h1 className="text-xl font-bold tracking-widest text-white">LIVE</h1>
+        </div>
+
+        <div className="text-4xl font-bold text-green-400 mb-10 tracking-wider drop-shadow-[0_0_10px_rgba(74,222,128,0.3)]">
           Y: {Math.floor(depth)}
         </div>
         
-        <div className="text-xl text-gray-400 mb-6 border-b border-[#1e1e1e] pb-2 font-bold tracking-widest">
+        <div className="text-sm text-slate-400 mb-6 border-b border-slate-800/50 pb-2 font-bold tracking-widest">
           INVENTORY
         </div>
         
-        <div className="space-y-6">
+        <div className="space-y-5">
           {BLOCK_TYPES.map(type => (
-            <div key={type} className="flex items-center gap-4">
+            <div key={type} className="flex items-center gap-4 bg-slate-900/40 p-2 rounded-lg border border-slate-800/50">
               <div 
-                className="w-8 h-8 rounded-sm shrink-0"
+                className="w-8 h-8 rounded-sm shrink-0 shadow-lg"
                 style={{ 
                   backgroundColor: BLOCK_COLORS[type].base, 
                   borderTop: `3px solid ${BLOCK_COLORS[type].light}`, 
@@ -392,61 +374,48 @@ export default function FallingBlocksCanvas() {
                   borderRight: `3px solid ${BLOCK_COLORS[type].dark}`
                 }}
               />
-              <div className="text-lg text-gray-200 font-bold">
-                {type}: <span className="text-white">{blockCounts[type]}</span>
+              <div className="text-lg text-slate-300 font-bold flex-1 flex justify-between">
+                <span>{type}</span>
+                <span className="text-white">{blockCounts[type]}</span>
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Center: Canvas Area */}
-      <div className="flex-1 relative" ref={containerRef}>
-        <canvas ref={canvasRef} className="absolute inset-0 block w-full h-full" />
-      </div>
-
-      {/* Right Sidebar: Chatters & Commands */}
-      <div className="w-[320px] bg-[#0a0a0a] border-l border-[#1e1e1e] p-6 flex flex-col z-10 shrink-0">
+      <div className="w-[320px] h-full ml-auto bg-slate-950/60 backdrop-blur-xl border-l border-slate-800/50 p-6 flex flex-col z-10 shrink-0 shadow-2xl">
         <div className="mb-10">
-          <div className="flex items-center gap-2 text-xl text-gray-400 mb-4 border-b border-[#1e1e1e] pb-2 font-bold tracking-widest">
-            <Trophy size={20} className="text-yellow-500" />
+          <div className="flex items-center gap-2 text-sm text-slate-400 mb-4 border-b border-slate-800/50 pb-2 font-bold tracking-widest">
+            <Trophy size={16} className="text-yellow-500" />
             TOP CHATTERS
           </div>
-          <div className="space-y-4">
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-300">1. GamerPro99</span>
+          <div className="space-y-3">
+            <div className="flex justify-between text-sm bg-slate-900/40 p-2 rounded border border-slate-800/30">
+              <span className="text-slate-300">1. GamerPro99</span>
               <span className="text-yellow-500 font-bold">15.2K</span>
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-300">2. UzbekNinja</span>
+            <div className="flex justify-between text-sm bg-slate-900/40 p-2 rounded border border-slate-800/30">
+              <span className="text-slate-300">2. UzbekNinja</span>
               <span className="text-yellow-500 font-bold">12.8K</span>
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-300">3. BlockMaster</span>
+            <div className="flex justify-between text-sm bg-slate-900/40 p-2 rounded border border-slate-800/30">
+              <span className="text-slate-300">3. BlockMaster</span>
               <span className="text-yellow-500 font-bold">9.5K</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-300">4. StreamFan</span>
-              <span className="text-yellow-500 font-bold">8.1K</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-300">5. Ali_Dev</span>
-              <span className="text-yellow-500 font-bold">6.4K</span>
             </div>
           </div>
         </div>
 
         <div>
-          <div className="flex items-center gap-2 text-xl text-gray-400 mb-4 border-b border-[#1e1e1e] pb-2 font-bold tracking-widest">
-            <Terminal size={20} className="text-blue-400" />
+          <div className="flex items-center gap-2 text-sm text-slate-400 mb-4 border-b border-slate-800/50 pb-2 font-bold tracking-widest">
+            <Terminal size={16} className="text-blue-400" />
             COMMANDS
           </div>
-          <div className="space-y-3 text-sm text-blue-300">
-            <div>!tnt - Drop TNT</div>
-            <div>!mega - Mega TNT</div>
-            <div>!nuke - Clear Screen</div>
-            <div>!siu - Celebration</div>
-            <div>!pickaxe - Big Pickaxe</div>
+          <div className="space-y-2 text-sm text-blue-300/80 font-mono bg-slate-900/60 p-4 rounded-lg border border-slate-800/50">
+            <div>{'>'} !drop TNT</div>
+            <div>{'>'} !mega (Mega TNT)</div>
+            <div>{'>'} !nuke (Clear 10 rows)</div>
+            <div>{'>'} !siu (Celebration)</div>
+            <div>{'>'} !pickaxe (Big Pickaxe)</div>
           </div>
         </div>
       </div>
