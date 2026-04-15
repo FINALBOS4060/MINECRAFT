@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Trophy, Terminal, ChevronDown, Pickaxe } from 'lucide-react';
+import { Trophy, Terminal } from 'lucide-react';
 
 // Types and Constants
-type BlockType = 'Stone' | 'Coal' | 'Iron' | 'Gold' | 'Diamond' | 'TNT';
+type BlockType = 'Bedrock' | 'Stone' | 'Coal' | 'Iron' | 'Gold' | 'Diamond' | 'TNT';
 
 interface BlockColors {
   base: string;
@@ -14,6 +14,7 @@ const BLOCK_TYPES: BlockType[] = ['Stone', 'Coal', 'Iron', 'Gold', 'Diamond', 'T
 const BLOCK_PROBS = [0.65, 0.15, 0.10, 0.05, 0.03, 0.02];
 
 const BLOCK_COLORS: Record<BlockType, BlockColors> = {
+  Bedrock: { base: '#141414', light: '#282828', dark: '#000000' },
   Stone: { base: '#646464', light: '#828282', dark: '#464646' },
   Coal: { base: '#282828', light: '#3c3c3c', dark: '#141414' },
   Iron: { base: '#c8b4a0', light: '#e6d2be', dark: '#aa9682' },
@@ -22,9 +23,9 @@ const BLOCK_COLORS: Record<BlockType, BlockColors> = {
   TNT: { base: '#c83232', light: '#f05050', dark: '#961e1e' }
 };
 
-const COLS = 7;
-const ROWS = 12;
-const BLOCK_SIZE = 55;
+const COLS = 10;
+const ROWS = 20;
+const BLOCK_SIZE = 36;
 const MINE_RATE_MS = 150;
 
 interface Particle {
@@ -53,9 +54,10 @@ export default function FallingBlocksCanvas() {
   const renderLoopRef = useRef<number | null>(null);
   const gridRef = useRef<BlockType[][]>([]);
   const particlesRef = useRef<Particle[]>([]);
+  const commandQueueRef = useRef<string[]>([]);
   
   const [depth, setDepth] = useState(-10405);
-  const [blockCounts, setBlockCounts] = useState<Record<BlockType, number>>({
+  const [blockCounts, setBlockCounts] = useState<Record<string, number>>({
     Stone: 0, Coal: 0, Iron: 0, Gold: 0, Diamond: 0, TNT: 0
   });
 
@@ -65,7 +67,11 @@ export default function FallingBlocksCanvas() {
     for (let c = 0; c < COLS; c++) {
       initialGrid[c] = [];
       for (let r = 0; r < ROWS; r++) {
-        initialGrid[c][r] = getRandomBlock();
+        if (c === 0 || c === COLS - 1) {
+          initialGrid[c][r] = 'Bedrock';
+        } else {
+          initialGrid[c][r] = getRandomBlock();
+        }
       }
     }
     gridRef.current = initialGrid;
@@ -82,6 +88,7 @@ export default function FallingBlocksCanvas() {
     let pickaxeAngle = 0;
     let targetPickaxeAngle = 0;
     let lastMineTime = Date.now();
+    let lastCmdTime = Date.now();
 
     const updateSize = () => {
       const { width, height } = containerRef.current!.getBoundingClientRect();
@@ -106,10 +113,12 @@ export default function FallingBlocksCanvas() {
     };
 
     const mineBlock = (col: number, row: number) => {
+      if (col === 0 || col === COLS - 1) return; // Cannot mine bedrock
+
       const bType = gridRef.current[col][row];
       
-      setBlockCounts(prev => ({ ...prev, [bType]: prev[bType] + 1 }));
-      setDepth(d => d - 1);
+      setBlockCounts(prev => ({ ...prev, [bType]: (prev[bType] || 0) + 1 }));
+      setDepth(d => d - 0.1);
 
       const shaftWidth = COLS * BLOCK_SIZE;
       const shaftHeight = ROWS * BLOCK_SIZE;
@@ -127,16 +136,16 @@ export default function FallingBlocksCanvas() {
       }
       gridRef.current[col][0] = getRandomBlock();
 
-      // TNT Nuke Logic
+      // TNT Logic
       if (bType === 'TNT') {
         flashAlpha = 1.0;
         let blocksCleared = 0;
-        for (let c = 0; c < COLS; c++) {
+        for (let c = 1; c < COLS - 1; c++) {
           for (let r = 0; r < 3; r++) { // Clear bottom 3 rows
             const targetRow = ROWS - 1;
             const tbType = gridRef.current[c][targetRow];
             
-            setBlockCounts(prev => ({ ...prev, [tbType]: prev[tbType] + 1 }));
+            setBlockCounts(prev => ({ ...prev, [tbType]: (prev[tbType] || 0) + 1 }));
             
             const tx = shaftX + c * BLOCK_SIZE + BLOCK_SIZE / 2;
             const ty = shaftY + targetRow * BLOCK_SIZE + BLOCK_SIZE / 2;
@@ -149,19 +158,66 @@ export default function FallingBlocksCanvas() {
             blocksCleared++;
           }
         }
-        setDepth(d => d - blocksCleared);
+        setDepth(d => d - 3);
       }
+    };
+
+    const processNuke = () => {
+      flashAlpha = 1.0;
+      const shaftWidth = COLS * BLOCK_SIZE;
+      const shaftHeight = ROWS * BLOCK_SIZE;
+      const shaftX = (canvas.width - shaftWidth) / 2;
+      const shaftY = (canvas.height - shaftHeight) / 2;
+
+      for (let c = 1; c < COLS - 1; c++) {
+        // Shift down by 5
+        for (let r = ROWS - 1; r >= 5; r--) {
+          gridRef.current[c][r] = gridRef.current[c][r - 5];
+        }
+        // Fill top 5
+        for (let r = 0; r < 5; r++) {
+          gridRef.current[c][r] = getRandomBlock();
+        }
+        
+        const tx = shaftX + c * BLOCK_SIZE + BLOCK_SIZE / 2;
+        const ty = shaftY + (ROWS - 1) * BLOCK_SIZE;
+        spawnParticles(tx, ty, '#cccccc', 10);
+      }
+      setDepth(d => d - 5);
     };
 
     const render = () => {
       const now = Date.now();
-      const dt = 16 / 1000; // Approx 60fps
+
+      // Simulated Command Queue
+      if (now - lastCmdTime > 2000) {
+        if (Math.random() < 0.1) {
+          commandQueueRef.current.push('!nuke');
+        } else if (Math.random() < 0.3) {
+          commandQueueRef.current.push('!drop TNT');
+        }
+        lastCmdTime = now;
+      }
+
+      // Process Commands
+      if (commandQueueRef.current.length > 0) {
+        const cmd = commandQueueRef.current.shift();
+        if (cmd === '!nuke') {
+          processNuke();
+        } else if (cmd?.startsWith('!drop ')) {
+          const item = cmd.split(' ')[1] as BlockType;
+          if (BLOCK_TYPES.includes(item)) {
+            const c = Math.floor(Math.random() * (COLS - 2)) + 1;
+            gridRef.current[c][0] = item;
+          }
+        }
+      }
 
       // Auto Mining
       if (now - lastMineTime > MINE_RATE_MS) {
-        const targetCol = Math.floor(Math.random() * COLS);
+        const targetCol = Math.floor(Math.random() * (COLS - 2)) + 1;
         mineBlock(targetCol, ROWS - 1);
-        targetPickaxeAngle = targetCol < COLS / 2 ? -0.5 : 0.5;
+        targetPickaxeAngle = targetCol < COLS / 2 ? -0.8 : 0.8;
         lastMineTime = now;
       }
 
@@ -180,9 +236,9 @@ export default function FallingBlocksCanvas() {
       const shaftY = (canvas.height - shaftHeight) / 2;
 
       // Draw Shaft Background
-      ctx.fillStyle = '#141414';
+      ctx.fillStyle = '#050505';
       ctx.fillRect(shaftX, shaftY, shaftWidth, shaftHeight);
-      ctx.strokeStyle = '#282828';
+      ctx.strokeStyle = '#1e1e1e';
       ctx.lineWidth = 4;
       ctx.strokeRect(shaftX, shaftY, shaftWidth, shaftHeight);
 
@@ -195,7 +251,7 @@ export default function FallingBlocksCanvas() {
           const bx = shaftX + c * BLOCK_SIZE;
           const by = shaftY + r * BLOCK_SIZE;
           const colors = BLOCK_COLORS[bType];
-          const bevel = 6;
+          const bevel = 4;
 
           // Base
           ctx.fillStyle = colors.base;
@@ -235,36 +291,41 @@ export default function FallingBlocksCanvas() {
           ctx.lineTo(bx + BLOCK_SIZE, by + BLOCK_SIZE);
           ctx.fill();
 
-          // Inner Detail
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+          // Inner Detail (Pixel Art Style)
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
           ctx.fillRect(bx + bevel, by + bevel, BLOCK_SIZE - bevel * 2, BLOCK_SIZE - bevel * 2);
 
           // TNT Label
           if (bType === 'TNT') {
             ctx.fillStyle = '#fff';
-            ctx.font = 'bold 16px Arial';
+            ctx.font = 'bold 12px Arial';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText('TNT', bx + BLOCK_SIZE / 2, by + BLOCK_SIZE / 2);
           }
+
+          // Shadow Overlay (Deeper = Darker)
+          const shadowIntensity = r / ROWS;
+          ctx.fillStyle = `rgba(0, 0, 0, ${shadowIntensity * 0.8})`;
+          ctx.fillRect(bx, by, BLOCK_SIZE, BLOCK_SIZE);
         }
       }
 
-      // Draw Pickaxe
+      // Draw Giant Pickaxe
       ctx.save();
-      ctx.translate(shaftX + shaftWidth / 2, shaftY + shaftHeight - 20);
+      ctx.translate(shaftX + shaftWidth / 2, shaftY + shaftHeight - 30);
       ctx.rotate(pickaxeAngle);
       
       // Handle
-      ctx.fillStyle = '#8b4513';
-      ctx.fillRect(-5, -40, 10, 80);
-      // Head
-      ctx.fillStyle = '#969696';
+      ctx.fillStyle = '#654321';
+      ctx.fillRect(-5, -50, 10, 90);
+      // Head (Diamond Pickaxe)
+      ctx.fillStyle = '#32c8c8';
       ctx.beginPath();
-      ctx.moveTo(-40, -30);
-      ctx.quadraticCurveTo(0, -50, 40, -30);
-      ctx.lineTo(40, -20);
-      ctx.quadraticCurveTo(0, -40, -40, -20);
+      ctx.moveTo(-50, -40);
+      ctx.quadraticCurveTo(0, -70, 50, -40);
+      ctx.lineTo(50, -30);
+      ctx.quadraticCurveTo(0, -50, -50, -30);
       ctx.closePath();
       ctx.fill();
       
@@ -307,14 +368,14 @@ export default function FallingBlocksCanvas() {
   }, []);
 
   return (
-    <div className="flex h-full w-full bg-[#0a0a0a] text-white font-mono overflow-hidden">
+    <div className="flex h-full w-full bg-[#050505] text-white font-mono overflow-hidden">
       {/* Left Sidebar: Depth & Inventory */}
-      <div className="w-[280px] bg-[#111] border-r border-[#333] p-6 flex flex-col z-10 shrink-0">
+      <div className="w-[280px] bg-[#0a0a0a] border-r border-[#1e1e1e] p-6 flex flex-col z-10 shrink-0">
         <div className="text-4xl font-bold text-green-400 mb-10 tracking-wider">
-          Y: {depth}
+          Y: {Math.floor(depth)}
         </div>
         
-        <div className="text-xl text-gray-400 mb-6 border-b border-[#333] pb-2 font-bold tracking-widest">
+        <div className="text-xl text-gray-400 mb-6 border-b border-[#1e1e1e] pb-2 font-bold tracking-widest">
           INVENTORY
         </div>
         
@@ -345,9 +406,9 @@ export default function FallingBlocksCanvas() {
       </div>
 
       {/* Right Sidebar: Chatters & Commands */}
-      <div className="w-[320px] bg-[#111] border-l border-[#333] p-6 flex flex-col z-10 shrink-0">
+      <div className="w-[320px] bg-[#0a0a0a] border-l border-[#1e1e1e] p-6 flex flex-col z-10 shrink-0">
         <div className="mb-10">
-          <div className="flex items-center gap-2 text-xl text-gray-400 mb-4 border-b border-[#333] pb-2 font-bold tracking-widest">
+          <div className="flex items-center gap-2 text-xl text-gray-400 mb-4 border-b border-[#1e1e1e] pb-2 font-bold tracking-widest">
             <Trophy size={20} className="text-yellow-500" />
             TOP CHATTERS
           </div>
@@ -376,7 +437,7 @@ export default function FallingBlocksCanvas() {
         </div>
 
         <div>
-          <div className="flex items-center gap-2 text-xl text-gray-400 mb-4 border-b border-[#333] pb-2 font-bold tracking-widest">
+          <div className="flex items-center gap-2 text-xl text-gray-400 mb-4 border-b border-[#1e1e1e] pb-2 font-bold tracking-widest">
             <Terminal size={20} className="text-blue-400" />
             COMMANDS
           </div>

@@ -10,9 +10,9 @@ WIDTH, HEIGHT = 1280, 720
 FPS = 60
 
 # Grid Settings
-COLS = 7
-ROWS = 12
-BLOCK_SIZE = 55
+COLS = 10
+ROWS = 20
+BLOCK_SIZE = 36
 SHAFT_WIDTH = COLS * BLOCK_SIZE
 SHAFT_HEIGHT = ROWS * BLOCK_SIZE
 
@@ -28,6 +28,7 @@ BLOCK_TYPES = ["Stone", "Coal", "Iron", "Gold", "Diamond", "TNT"]
 BLOCK_PROBS = [0.65, 0.15, 0.10, 0.05, 0.03, 0.02]
 
 BLOCK_COLORS = {
+    "Bedrock": {"base": (20, 20, 20),    "high": (40, 40, 40),    "shadow": (0, 0, 0)},
     "Stone":   {"base": (100, 100, 100), "high": (130, 130, 130), "shadow": (70, 70, 70)},
     "Coal":    {"base": (40, 40, 40),    "high": (60, 60, 60),    "shadow": (20, 20, 20)},
     "Iron":    {"base": (200, 180, 160), "high": (230, 210, 190), "shadow": (170, 150, 130)},
@@ -41,7 +42,7 @@ BLOCK_COLORS = {
 # ==========================================
 pygame.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Vertical Mining - Viral Stream Edition")
+pygame.display.set_caption("Vertical Mining - Strict Grid Edition")
 clock = pygame.time.Clock()
 
 font_large = pygame.font.SysFont("Consolas", 36, bold=True)
@@ -54,7 +55,16 @@ font_small = pygame.font.SysFont("Consolas", 18)
 def get_random_block():
     return random.choices(BLOCK_TYPES, weights=BLOCK_PROBS, k=1)[0]
 
-grid = [[get_random_block() for _ in range(ROWS)] for _ in range(COLS)]
+grid = []
+for c in range(COLS):
+    col = []
+    for r in range(ROWS):
+        if c == 0 or c == COLS - 1:
+            col.append("Bedrock")
+        else:
+            col.append(get_random_block())
+    grid.append(col)
+
 block_counts = {bt: 0 for bt in BLOCK_TYPES}
 depth = -10405
 
@@ -81,6 +91,8 @@ commands = [
     "!pickaxe - Big Pickaxe"
 ]
 
+command_queue = []
+
 # ==========================================
 # RENDERING HELPERS
 # ==========================================
@@ -93,27 +105,27 @@ def create_block_surface(b_type):
     # Base
     surf.fill(colors["base"])
     
-    # Bevels
-    bevel = 6
+    # Pixelated Bevels (Minecraft style)
+    bevel = 4
     pygame.draw.polygon(surf, colors["high"], [(0, 0), (BLOCK_SIZE, 0), (BLOCK_SIZE-bevel, bevel), (bevel, bevel)])
     pygame.draw.polygon(surf, colors["high"], [(0, 0), (bevel, bevel), (bevel, BLOCK_SIZE-bevel), (0, BLOCK_SIZE)])
     pygame.draw.polygon(surf, colors["shadow"], [(0, BLOCK_SIZE), (BLOCK_SIZE, BLOCK_SIZE), (BLOCK_SIZE-bevel, BLOCK_SIZE-bevel), (bevel, BLOCK_SIZE-bevel)])
     pygame.draw.polygon(surf, colors["shadow"], [(BLOCK_SIZE, 0), (BLOCK_SIZE-bevel, bevel), (BLOCK_SIZE-bevel, BLOCK_SIZE-bevel), (BLOCK_SIZE, BLOCK_SIZE)])
     
-    # Inner detail
+    # Inner detail (pixel art style)
     inner = pygame.Rect(bevel, bevel, BLOCK_SIZE - bevel*2, BLOCK_SIZE - bevel*2)
-    pygame.draw.rect(surf, (255, 255, 255, 10), inner)
+    pygame.draw.rect(surf, (255, 255, 255, 15), inner)
     
     # TNT Label
     if b_type == "TNT":
-        tnt_font = pygame.font.SysFont("Arial", 16, bold=True)
+        tnt_font = pygame.font.SysFont("Arial", 12, bold=True)
         text = tnt_font.render("TNT", True, (255, 255, 255))
         trect = text.get_rect(center=(BLOCK_SIZE//2, BLOCK_SIZE//2))
         surf.blit(text, trect)
         
     return surf
 
-for bt in BLOCK_TYPES:
+for bt in BLOCK_COLORS.keys():
     block_surfaces[bt] = create_block_surface(bt)
 
 def spawn_particles(x, y, color, count=10):
@@ -132,9 +144,12 @@ def spawn_particles(x, y, color, count=10):
 # ==========================================
 def mine_block(col, row):
     global depth, flash_alpha
+    if col == 0 or col == COLS - 1:
+        return # Cannot mine bedrock
+        
     b_type = grid[col][row]
-    block_counts[b_type] += 1
-    depth -= 1
+    if b_type in block_counts:
+        block_counts[b_type] += 1
     
     # Screen coordinates for particles
     px = SHAFT_X + col * BLOCK_SIZE + BLOCK_SIZE // 2
@@ -146,15 +161,15 @@ def mine_block(col, row):
         grid[col][r] = grid[col][r-1]
     grid[col][0] = get_random_block()
     
-    # TNT Nuke Logic
+    # TNT Logic
     if b_type == "TNT":
         flash_alpha = 255.0
-        blocks_cleared = 0
-        for c in range(COLS):
+        for c in range(1, COLS - 1):
             for r in range(3): # Clear bottom 3 rows of all columns
                 target_r = ROWS - 1
                 tb_type = grid[c][target_r]
-                block_counts[tb_type] += 1
+                if tb_type in block_counts:
+                    block_counts[tb_type] += 1
                 
                 tx = SHAFT_X + c * BLOCK_SIZE + BLOCK_SIZE // 2
                 ty = SHAFT_Y + target_r * BLOCK_SIZE + BLOCK_SIZE // 2
@@ -163,13 +178,30 @@ def mine_block(col, row):
                 for i in range(target_r, 0, -1):
                     grid[c][i] = grid[c][i-1]
                 grid[c][0] = get_random_block()
-                blocks_cleared += 1
-        depth -= blocks_cleared
+        depth -= 3 # 3 rows cleared
+
+def process_nuke():
+    global depth, flash_alpha
+    flash_alpha = 255.0
+    for c in range(1, COLS - 1):
+        # Shift down by 5
+        for r in range(ROWS - 1, 4, -1):
+            grid[c][r] = grid[c][r - 5]
+        # Fill top 5
+        for r in range(5):
+            grid[c][r] = get_random_block()
+            
+        # Spawn particles at bottom
+        tx = SHAFT_X + c * BLOCK_SIZE + BLOCK_SIZE // 2
+        ty = SHAFT_Y + (ROWS - 1) * BLOCK_SIZE
+        spawn_particles(tx, ty, (200, 200, 200), count=10)
+    depth -= 5
 
 # ==========================================
 # MAIN LOOP
 # ==========================================
 last_mine_time = pygame.time.get_ticks()
+last_cmd_time = pygame.time.get_ticks()
 MINE_RATE_MS = 150
 
 running = True
@@ -181,13 +213,33 @@ while running:
         if event.type == pygame.QUIT:
             running = False
             
+    # Simulated Command Queue
+    if current_time - last_cmd_time > 2000:
+        if random.random() < 0.1:
+            command_queue.append("!nuke")
+        elif random.random() < 0.3:
+            command_queue.append("!drop TNT")
+        last_cmd_time = current_time
+
+    # Process Commands
+    if command_queue:
+        cmd = command_queue.pop(0)
+        if cmd == "!nuke":
+            process_nuke()
+        elif cmd.startswith("!drop "):
+            item = cmd.split(" ")[1]
+            if item in BLOCK_TYPES:
+                c = random.randint(1, COLS - 2)
+                grid[c][0] = item
+
     # Auto Mining
     if current_time - last_mine_time > MINE_RATE_MS:
-        target_col = random.randint(0, COLS - 1)
+        target_col = random.randint(1, COLS - 2)
         mine_block(target_col, ROWS - 1)
+        depth -= 0.1 # Small depth increment per block
         
         # Animate Pickaxe
-        target_pickaxe_angle = -30 if target_col < COLS // 2 else 30
+        target_pickaxe_angle = -45 if target_col < COLS // 2 else 45
         last_mine_time = current_time
 
     # Pickaxe return animation
@@ -213,14 +265,14 @@ while running:
     # ==========================================
     # DRAWING
     # ==========================================
-    screen.fill((10, 10, 10)) # Very dark background
+    screen.fill((5, 5, 5)) # Deep cave background
     
     # 1. Center Mine Shaft
     shaft_rect = pygame.Rect(SHAFT_X, SHAFT_Y, SHAFT_WIDTH, SHAFT_HEIGHT)
-    pygame.draw.rect(screen, (20, 20, 20), shaft_rect) # Shaft background
-    pygame.draw.rect(screen, (40, 40, 40), shaft_rect, 4) # Shaft border
+    pygame.draw.rect(screen, (10, 10, 10), shaft_rect) # Shaft background
+    pygame.draw.rect(screen, (30, 30, 30), shaft_rect, 4) # Shaft border
     
-    # Draw Grid
+    # Draw Grid with Shadow Overlay
     for c in range(COLS):
         for r in range(ROWS):
             b_type = grid[c][r]
@@ -228,15 +280,21 @@ while running:
             by = SHAFT_Y + r * BLOCK_SIZE
             screen.blit(block_surfaces[b_type], (bx, by))
             
-    # Draw Pickaxe
-    pickaxe_surf = pygame.Surface((100, 100), pygame.SRCALPHA)
+            # Shadow Overlay (deeper = darker)
+            shadow_intensity = int((r / ROWS) * 200)
+            shadow_surf = pygame.Surface((BLOCK_SIZE, BLOCK_SIZE), pygame.SRCALPHA)
+            shadow_surf.fill((0, 0, 0, shadow_intensity))
+            screen.blit(shadow_surf, (bx, by))
+            
+    # Draw Giant Pickaxe
+    pickaxe_surf = pygame.Surface((120, 120), pygame.SRCALPHA)
     # Handle
-    pygame.draw.rect(pickaxe_surf, (139, 69, 19), (45, 20, 10, 80))
-    # Head
-    pygame.draw.polygon(pickaxe_surf, (150, 150, 150), [(50, 30), (10, 50), (20, 20), (50, 10), (80, 20), (90, 50)])
+    pygame.draw.rect(pickaxe_surf, (101, 67, 33), (55, 30, 10, 90))
+    # Head (Diamond Pickaxe style)
+    pygame.draw.polygon(pickaxe_surf, (50, 200, 200), [(60, 40), (10, 70), (20, 30), (60, 10), (100, 30), (110, 70)])
     
     rotated_pickaxe = pygame.transform.rotate(pickaxe_surf, pickaxe_angle)
-    pr = rotated_pickaxe.get_rect(center=(SHAFT_X + SHAFT_WIDTH // 2, SHAFT_Y + SHAFT_HEIGHT - 20))
+    pr = rotated_pickaxe.get_rect(center=(SHAFT_X + SHAFT_WIDTH // 2, SHAFT_Y + SHAFT_HEIGHT - 30))
     screen.blit(rotated_pickaxe, pr)
     
     # Draw Particles
@@ -255,19 +313,18 @@ while running:
 
     # 2. Left Sidebar (Depth & Inventory)
     pygame.draw.rect(screen, (15, 15, 15), (0, 0, LEFT_PANEL_WIDTH, HEIGHT))
-    pygame.draw.line(screen, (50, 50, 50), (LEFT_PANEL_WIDTH, 0), (LEFT_PANEL_WIDTH, HEIGHT), 2)
+    pygame.draw.line(screen, (40, 40, 40), (LEFT_PANEL_WIDTH, 0), (LEFT_PANEL_WIDTH, HEIGHT), 2)
     
-    depth_text = font_large.render(f"Y: {depth}", True, (100, 255, 100))
+    depth_text = font_large.render(f"Y: {int(depth)}", True, (100, 255, 100))
     screen.blit(depth_text, (20, 40))
     
     inv_title = font_medium.render("INVENTORY", True, (150, 150, 150))
     screen.blit(inv_title, (20, 120))
-    pygame.draw.line(screen, (50, 50, 50), (20, 150), (LEFT_PANEL_WIDTH - 20, 150), 2)
+    pygame.draw.line(screen, (40, 40, 40), (20, 150), (LEFT_PANEL_WIDTH - 20, 150), 2)
     
     y_offset = 180
     for b_type in BLOCK_TYPES:
         count = block_counts[b_type]
-        # Mini block icon
         icon = pygame.transform.scale(block_surfaces[b_type], (30, 30))
         screen.blit(icon, (20, y_offset))
         
@@ -278,12 +335,12 @@ while running:
     # 3. Right Sidebar (Chatters & Commands)
     right_x = WIDTH - RIGHT_PANEL_WIDTH
     pygame.draw.rect(screen, (15, 15, 15), (right_x, 0, RIGHT_PANEL_WIDTH, HEIGHT))
-    pygame.draw.line(screen, (50, 50, 50), (right_x, 0), (right_x, HEIGHT), 2)
+    pygame.draw.line(screen, (40, 40, 40), (right_x, 0), (right_x, HEIGHT), 2)
     
     # Top Chatters
     chat_title = font_medium.render("TOP CHATTERS", True, (150, 150, 150))
     screen.blit(chat_title, (right_x + 20, 40))
-    pygame.draw.line(screen, (50, 50, 50), (right_x + 20, 70), (WIDTH - 20, 70), 2)
+    pygame.draw.line(screen, (40, 40, 40), (right_x + 20, 70), (WIDTH - 20, 70), 2)
     
     y_offset = 90
     for name, score in top_chatters:
@@ -296,7 +353,7 @@ while running:
     # Commands
     cmd_title = font_medium.render("COMMANDS", True, (150, 150, 150))
     screen.blit(cmd_title, (right_x + 20, 320))
-    pygame.draw.line(screen, (50, 50, 50), (right_x + 20, 350), (WIDTH - 20, 350), 2)
+    pygame.draw.line(screen, (40, 40, 40), (right_x + 20, 350), (WIDTH - 20, 350), 2)
     
     y_offset = 370
     for cmd in commands:
